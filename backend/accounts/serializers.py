@@ -5,7 +5,7 @@ from .models import User
 class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
-        fields = ('id', 'email', 'first_name', 'last_name', 'email_verified')
+        fields = ('id', 'email', 'first_name', 'last_name')
         read_only_fields = fields
 
 class RegisterSerializer(serializers.ModelSerializer):
@@ -33,7 +33,7 @@ class RegisterSerializer(serializers.ModelSerializer):
     def create(self, validated_data):
         validated_data.pop('password_repeat')
         password = validated_data.pop('password')
-        return User.objects.create_user(password=password, is_active=False, **validated_data)
+        return User.objects.create_user(password=password, **validated_data)
 
 class LoginSerializer(serializers.Serializer):
     email = serializers.EmailField()
@@ -43,6 +43,6 @@ class LoginSerializer(serializers.Serializer):
         user = authenticate(request=self.context.get('request'),
                             username=attrs['email'].lower(), password=attrs['password'])
         if not user:
-            raise serializers.ValidationError('Invalid credentials or email is not verified.')
+            raise serializers.ValidationError('Invalid email or password.')
         attrs['user'] = user
         return attrs

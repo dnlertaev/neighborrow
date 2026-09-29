@@ -14,7 +14,6 @@ class UserManager(BaseUserManager):
         extra_fields.setdefault('is_staff', True)
         extra_fields.setdefault('is_superuser', True)
         extra_fields.setdefault('is_active', True)
-        extra_fields.setdefault('email_verified', True)
         if not extra_fields['is_staff'] or not extra_fields['is_superuser']:
             raise ValueError('Superuser must have is_staff and is_superuser')
         return self.create_user(email, password, **extra_fields)
@@ -22,7 +21,6 @@ class UserManager(BaseUserManager):
 class User(AbstractUser):
     username = None
     email = models.EmailField(unique=True)
-    email_verified = models.BooleanField(default=False)
     USERNAME_FIELD = 'email'
     REQUIRED_FIELDS = []
     objects = UserManager()

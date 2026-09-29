@@ -1,10 +1,8 @@
-# Neighborrow Auth
+# Neighborrow
 
-Бэкенд для регистрации и входа пользователей. После регистрации пользователь подтверждает email, затем может войти.
 
 ## Запуск
 
-Открыть папку проекта в VS Code и выполнить в командной строке:
 
 ```powershell
 py -m venv .venv
@@ -13,25 +11,17 @@ py -m venv .venv
 .\.venv\Scripts\python.exe manage.py runserver
 ```
 
-Сервер запускается на `http://127.0.0.1:8000/`.
+`http://127.0.0.1:8000/api/v1/auth/`.
 
 ## Маршруты
 
 | Метод | Адрес | Назначение |
-| ----- | ----- | ---------- |
+| --- | --- | --- |
 | POST | `/api/v1/auth/register` | Регистрация |
-| POST | `/api/v1/auth/verify-email` | Подтверждение email |
 | POST | `/api/v1/auth/login` | Вход |
 | POST | `/api/v1/auth/refresh` | Обновление токена |
 | POST | `/api/v1/auth/logout` | Выход |
-| GET | `/api/v1/auth/me` | Данные пользователя |
+| GET | `/api/v1/auth/me` | Текущий пользователь |
 
-При локальном запуске письмо со ссылкой подтверждения выводится в терминал сервера.
+Для регистрации нужны `email`, `password` и `password_repeat`. После регистрации можно войти с `email` и `password`.
 
-## Тесты
-
-```powershell
-.\.venv\Scripts\python.exe manage.py test accounts
-```
-
-Если в конце написано `OK`, тесты прошли.
