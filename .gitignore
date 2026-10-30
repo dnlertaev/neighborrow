@@ -1,18 +1,46 @@
-# Python
-__pycache__/
-*.py[cod]
-.venv/
-venv/
-*.sqlite3
+# Local configuration and secrets
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p12
+*.pfx
 
-# Frontend
-node_modules/
+# Python environments and cache
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+
+# Local databases, uploads and collected static files
+*.sqlite3
+*.sqlite3-*
+*.db
+*.db-*
+*.sql
+*.dump
+media/
+staticfiles/
+*.log
+
+# Build outputs and frontend dependencies
+build/
 dist/
+*.egg-info/
+node_modules/
 .angular/
 
-# Editor
-.vscode/
+# Editors and OS files
 .idea/
+.vscode/
+.DS_Store
+Thumbs.db
