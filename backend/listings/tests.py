@@ -1,8 +1,9 @@
 from datetime import timedelta
+import secrets
 from django.core.cache import cache
 from django.utils import timezone
 from rest_framework.test import APITestCase
-from accounts.models import User
+from accounts.models import ResidentialComplex, User
 from .models import Activity, Category, Interest, Listing
 
 
@@ -13,6 +14,13 @@ class ListingAPITests(APITestCase):
                                             last_name='Brown', phone='+77000000000', address='Private street')
         cls.neighbor = User.objects.create_user('neighbor@example.com', 'Neighbor-pass-7341!')
         cls.third = User.objects.create_user('third@example.com', 'Third-pass-8931!')
+        cls.complex = ResidentialComplex(name='Shared Complex')
+        cls.complex.set_code(secrets.token_urlsafe(16))
+        cls.complex.save()
+        for user in (cls.owner, cls.neighbor, cls.third):
+            user.residential_complex = cls.complex
+            user.residential_verified_at = timezone.now()
+            user.save(update_fields=['residential_complex', 'residential_verified_at'])
         cls.tools = Category.objects.get(slug='tools')
         cls.garden = Category.objects.get(slug='garden')
         cls.offer = Listing.objects.create(owner=cls.owner, type='offer', title='Small hammer',
@@ -21,6 +29,7 @@ class ListingAPITests(APITestCase):
 
     def setUp(self):
         cache.clear()
+        self.authenticate()
 
     def payload(self, **extra):
         return {'title': 'Garden hose', 'description': 'For watering the plants', 'type': 'request',
@@ -29,7 +38,7 @@ class ListingAPITests(APITestCase):
     def authenticate(self, user=None):
         self.client.force_authenticate(user=user or self.owner)
 
-    def test_public_feed_hides_profile_and_contacts(self):
+    def test_feed_hides_profile_and_contacts(self):
         response = self.client.get('/api/v1/listings')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data['count'], 1)
@@ -42,6 +51,7 @@ class ListingAPITests(APITestCase):
         self.assertIsNone(item['distance_km'])
 
     def test_create_requires_authentication(self):
+        self.client.force_authenticate(user=None)
         self.assertEqual(self.client.post('/api/v1/listings', self.payload()).status_code, 401)
         self.assertEqual(Listing.objects.count(), 1)
 
@@ -113,6 +123,7 @@ class ListingAPITests(APITestCase):
 
     def test_contacts_require_login_and_no_private_profile_fallback(self):
         url = f'/api/v1/listings/{self.offer.pk}/contacts'
+        self.client.force_authenticate(user=None)
         self.assertEqual(self.client.get(url).status_code, 401)
         self.authenticate(self.neighbor)
         self.assertEqual(self.client.get(url).data['phone'], '+77001234567')
@@ -138,6 +149,7 @@ class ListingAPITests(APITestCase):
 
     def test_interest_is_idempotent_and_activity_is_private(self):
         url = f'/api/v1/listings/{self.offer.pk}/interest'
+        self.client.force_authenticate(user=None)
         self.assertEqual(self.client.post(url).status_code, 401)
         self.authenticate(self.neighbor)
         self.assertEqual(self.client.post(url).status_code, 201)
@@ -196,10 +208,95 @@ class ListingAPITests(APITestCase):
         self.authenticate(self.third)
         self.assertFalse(self.client.get(f'/api/v1/listings/{self.offer.pk}').data['has_responded'])
         self.client.force_authenticate(user=None)
-        self.assertFalse(self.client.get(f'/api/v1/listings/{self.offer.pk}').data['has_responded'])
+        self.assertEqual(self.client.get(f'/api/v1/listings/{self.offer.pk}').status_code, 401)
 
     def test_available_filter_excludes_expired_listings(self):
         self.offer.needed_until = timezone.localdate() - timedelta(days=1)
         self.offer.save()
         self.assertEqual(self.client.get('/api/v1/listings', {'available': 'true'}).data['count'], 0)
         self.assertEqual(self.client.get('/api/v1/listings', {'available': 'false'}).data['count'], 1)
+
+
+class ResidentialComplexIsolationTests(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.complex_a = ResidentialComplex(name='Complex A')
+        cls.complex_a.set_code(secrets.token_urlsafe(16))
+        cls.complex_a.save()
+        cls.complex_b = ResidentialComplex(name='Complex B')
+        cls.complex_b.set_code(secrets.token_urlsafe(16))
+        cls.complex_b.save()
+        cls.owner_a = User.objects.create_user('a@example.com', 'Owner-A-pass-7241!',
+            residential_complex=cls.complex_a, residential_verified_at=timezone.now())
+        cls.neighbor_a = User.objects.create_user('neighbor-a@example.com', 'Neighbor-A-pass-7341!',
+            residential_complex=cls.complex_a, residential_verified_at=timezone.now())
+        cls.owner_b = User.objects.create_user('b@example.com', 'Owner-B-pass-7441!',
+            residential_complex=cls.complex_b, residential_verified_at=timezone.now())
+        cls.unverified = User.objects.create_user('unverified@example.com', 'Unverified-pass-7541!')
+        cls.tools = Category.objects.get(slug='tools')
+        cls.offer_a = Listing.objects.create(owner=cls.owner_a, type='offer', title='A ladder',
+            description='From A', category=cls.tools, duration='1 day', contact_phone='+77001234567')
+        cls.offer_b = Listing.objects.create(owner=cls.owner_b, type='offer', title='B ladder',
+            description='From B', category=cls.tools, duration='1 day', contact_phone='+77007654321')
+        cls.legacy = Listing.objects.create(owner=cls.unverified, type='offer', title='Old listing',
+            description='Preserved but hidden', category=cls.tools, duration='1 day')
+
+    def setUp(self):
+        cache.clear()
+
+    def test_unverified_user_can_use_profile_but_not_listing_endpoints(self):
+        self.client.force_authenticate(user=self.unverified)
+        self.assertEqual(self.client.get('/api/v1/auth/me').status_code, 200)
+        self.assertEqual(self.client.get('/api/v1/auth/residential-complexes').status_code, 200)
+        listing = f'/api/v1/listings/{self.offer_a.pk}'
+        for method, url, payload in (
+            ('get', '/api/v1/listings', None), ('post', '/api/v1/listings', {'title': 'Blocked'}),
+            ('get', listing, None), ('patch', listing, {'title': 'Blocked'}),
+            ('delete', listing, None), ('get', listing + '/matches', None),
+            ('get', listing + '/contacts', None), ('post', listing + '/interest', None),
+            ('get', '/api/v1/activity', None)):
+            with self.subTest(method=method, url=url):
+                response = getattr(self.client, method)(url, payload) if payload is not None else getattr(self.client, method)(url)
+                self.assertEqual(response.status_code, 403)
+
+    def test_same_complex_can_publish_respond_and_see_contacts(self):
+        self.client.force_authenticate(user=self.neighbor_a)
+        response = self.client.post('/api/v1/listings', {'type': 'request', 'title': 'Need a ladder',
+            'description': 'For painting', 'category': self.tools.pk, 'duration': 'Today'}, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(self.client.get('/api/v1/listings').data['count'], 2)
+        self.assertEqual(self.client.post(f'/api/v1/listings/{self.offer_a.pk}/interest').status_code, 201)
+        self.assertEqual(self.client.get(f'/api/v1/listings/{self.offer_a.pk}/contacts').data['phone'], '+77001234567')
+        self.assertEqual(Interest.objects.filter(listing=self.offer_a, user=self.neighbor_a).count(), 1)
+        self.client.force_authenticate(user=self.owner_b)
+        self.assertEqual(self.client.get('/api/v1/listings').data['count'], 1)
+
+    def test_other_complex_is_invisible_even_by_direct_id(self):
+        self.client.force_authenticate(user=self.neighbor_a)
+        feed = self.client.get('/api/v1/listings', {'search': 'ladder'})
+        self.assertEqual(feed.status_code, 200)
+        self.assertEqual([x['id'] for x in feed.data['results']], [self.offer_a.pk])
+        other = f'/api/v1/listings/{self.offer_b.pk}'
+        for method, url, payload in (
+            ('get', other, None), ('patch', other, {'title': 'Changed'}),
+            ('delete', other, None), ('get', other + '/matches', None),
+            ('get', other + '/contacts', None), ('post', other + '/interest', None)):
+            with self.subTest(method=method, url=url):
+                response = getattr(self.client, method)(url, payload) if payload is not None else getattr(self.client, method)(url)
+                self.assertEqual(response.status_code, 404)
+        self.assertFalse(Interest.objects.filter(listing=self.offer_b).exists())
+
+    def test_activity_from_another_complex_stays_hidden(self):
+        Activity.objects.create(recipient=self.neighbor_a, actor=self.owner_b,
+            listing=self.offer_b, residential_complex=self.complex_b,
+            type='offer_requested', item_title=self.offer_b.title, description='From another complex')
+        self.client.force_authenticate(user=self.neighbor_a)
+        self.assertEqual(self.client.get('/api/v1/activity').data['count'], 0)
+
+    def test_legacy_listing_becomes_visible_only_after_owner_verifies(self):
+        self.client.force_authenticate(user=self.owner_a)
+        self.assertEqual(self.client.get(f'/api/v1/listings/{self.legacy.pk}').status_code, 404)
+        self.unverified.residential_complex = self.complex_a
+        self.unverified.residential_verified_at = timezone.now()
+        self.unverified.save(update_fields=['residential_complex', 'residential_verified_at'])
+        self.assertEqual(self.client.get(f'/api/v1/listings/{self.legacy.pk}').status_code, 200)

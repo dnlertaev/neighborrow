@@ -42,7 +42,8 @@ TEMPLATES = [{'BACKEND': 'django.template.backends.django.DjangoTemplates', 'DIR
                   'django.template.context_processors.request', 'django.contrib.auth.context_processors.auth',
                   'django.contrib.messages.context_processors.messages']}}]
 WSGI_APPLICATION = 'config.wsgi.application'
-DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3', 'NAME': BASE_DIR / 'db.sqlite3'}}
+DATABASES = {'default': {'ENGINE': 'django.db.backends.sqlite3',
+                         'NAME': os.environ.get('NEIGHBORROW_SQLITE_PATH') or BASE_DIR / 'db.sqlite3'}}
 if os.environ.get('DATABASE_URL'):
     database = urlparse(os.environ['DATABASE_URL'])
     if database.scheme not in ('postgres', 'postgresql'):
@@ -67,7 +68,8 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': ['rest_framework.permissions.IsAuthenticated'],
     'DEFAULT_THROTTLE_CLASSES': ['rest_framework.throttling.AnonRateThrottle',
                                'rest_framework.throttling.UserRateThrottle'],
-    'DEFAULT_THROTTLE_RATES': {'anon': '120/hour', 'user': '1000/hour', 'auth': '20/hour'},
+    'DEFAULT_THROTTLE_RATES': {'anon': '120/hour', 'user': '1000/hour', 'auth': '20/hour',
+                               'residence_verify': '5/hour'},
     'DEFAULT_PAGINATION_CLASS': 'listings.pagination.ListingPagination',
     'PAGE_SIZE': 20,
 }

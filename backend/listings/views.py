@@ -9,13 +9,14 @@ from rest_framework.decorators import action
 from rest_framework.exceptions import NotAuthenticated, ValidationError
 from rest_framework.response import Response
 from .models import Activity, Category, Interest, Listing
-from .permissions import IsOwnerOrReadOnly
+from .permissions import IsOwnerOrReadOnly, IsVerifiedResident
 from .serializers import (ActivitySerializer, CategorySerializer, FeedQuerySerializer,
                           ListingSerializer, PublicUserSerializer)
 
 
 def add_activity(listing, actor, event, description, recipient=None):
     Activity.objects.create(recipient=recipient or actor, actor=actor, listing=listing,
+                            residential_complex_id=listing.owner.residential_complex_id,
                             type=event, item_title=listing.title, description=description)
 
 
@@ -28,12 +29,15 @@ class CategoryListView(generics.ListAPIView):
 
 class ListingViewSet(viewsets.ModelViewSet):
     serializer_class = ListingSerializer
-    permission_classes = (IsOwnerOrReadOnly,)
+    permission_classes = (IsVerifiedResident, IsOwnerOrReadOnly)
     http_method_names = ['get', 'post', 'patch', 'delete', 'head', 'options']
-    queryset = Listing.objects.select_related('owner', 'category').filter(owner__is_active=True)
+    queryset = Listing.objects.select_related('owner', 'category').filter(
+        owner__is_active=True, archived_at__isnull=True)
 
     def get_queryset(self):
-        queryset = super().get_queryset()
+        queryset = super().get_queryset().filter(
+            owner__residential_complex_id=self.request.user.residential_complex_id,
+            owner__residential_verified_at__isnull=False)
         if self.request.user.is_authenticated:
             queryset = queryset.annotate(has_responded=Exists(Interest.objects.filter(
                 listing_id=OuterRef('pk'), user=self.request.user)))
@@ -92,7 +96,7 @@ class ListingViewSet(viewsets.ModelViewSet):
         add_activity(instance, self.request.user, 'listing_deleted', 'Deleted a listing')
         instance.delete()
 
-    @action(detail=True, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['get'], permission_classes=[IsVerifiedResident])
     def contacts(self, request, pk=None):
         listing = self.get_object()
         # Contacts are explicitly published per listing, never taken from a private profile.
@@ -117,10 +121,10 @@ class ListingViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(candidates)
         return self.get_paginated_response(self.get_serializer(page, many=True).data)
 
-    @action(detail=True, methods=['post'], permission_classes=[permissions.IsAuthenticated])
+    @action(detail=True, methods=['post'], permission_classes=[IsVerifiedResident])
     @transaction.atomic
     def interest(self, request, pk=None):
-        listing = get_object_or_404(Listing.objects.select_for_update(), pk=pk, owner__is_active=True)
+        listing = get_object_or_404(self.get_queryset().select_for_update(), pk=pk)
         if listing.owner_id == request.user.pk:
             raise ValidationError({'detail': 'You cannot respond to your own listing.'})
         if not listing.available or (listing.needed_until and listing.needed_until < timezone.localdate()):
@@ -136,6 +140,8 @@ class ListingViewSet(viewsets.ModelViewSet):
 
 class ActivityListView(generics.ListAPIView):
     serializer_class = ActivitySerializer
+    permission_classes = (IsVerifiedResident,)
 
     def get_queryset(self):
-        return Activity.objects.filter(recipient=self.request.user).select_related('actor', 'listing')
+        return Activity.objects.filter(recipient=self.request.user,
+            residential_complex_id=self.request.user.residential_complex_id).select_related('actor', 'listing')

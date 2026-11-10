@@ -7,14 +7,29 @@ from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.utils import get_md5_hash_password
-from .models import User
+from .models import ResidentialComplex, User
+
+
+class ResidentialComplexSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = ResidentialComplex
+        fields = ('id', 'name')
+
+
+class VerifyResidenceSerializer(serializers.Serializer):
+    residential_complex = serializers.IntegerField(min_value=1)
+    code = serializers.CharField(max_length=128, trim_whitespace=True, write_only=True)
 
 
 class UserSerializer(serializers.ModelSerializer):
+    residential_complex = ResidentialComplexSerializer(read_only=True)
+    is_resident_verified = serializers.BooleanField(read_only=True)
+
     class Meta:
         model = User
-        fields = ('id', 'email', 'first_name', 'last_name', 'address', 'phone', 'social_url')
-        read_only_fields = ('id', 'email')
+        fields = ('id', 'email', 'first_name', 'last_name', 'address', 'phone', 'social_url',
+                  'residential_complex', 'is_resident_verified')
+        read_only_fields = ('id', 'email', 'residential_complex', 'is_resident_verified')
 
     def validate_social_url(self, value):
         if value and not value.startswith(('https://', 'http://')):

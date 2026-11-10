@@ -1,5 +1,7 @@
 from django.db import transaction
+from django.utils import timezone
 from rest_framework import generics, permissions, status
+from rest_framework.exceptions import ValidationError
 from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
@@ -8,8 +10,11 @@ from rest_framework_simplejwt.settings import api_settings
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework_simplejwt.token_blacklist.models import BlacklistedToken, OutstandingToken
 from rest_framework_simplejwt.views import TokenRefreshView
+from .models import ResidentialComplex, User
+from listings.models import Listing
 from .serializers import (LoginSerializer, LogoutSerializer, RegisterSerializer, UserSerializer,
-                          PasswordConfirmationSerializer, PasswordChangeSerializer, RefreshSerializer)
+                          PasswordConfirmationSerializer, PasswordChangeSerializer, RefreshSerializer,
+                          ResidentialComplexSerializer, VerifyResidenceSerializer)
 
 
 class AuthThrottleMixin:
@@ -38,6 +43,41 @@ class LoginView(AuthThrottleMixin, APIView):
 
 class RefreshView(AuthThrottleMixin, TokenRefreshView):
     serializer_class = RefreshSerializer
+
+
+class ResidentialComplexListView(generics.ListAPIView):
+    serializer_class = ResidentialComplexSerializer
+    pagination_class = None
+    queryset = ResidentialComplex.objects.filter(is_active=True)
+
+
+class VerifyResidenceView(APIView):
+    throttle_classes = (ScopedRateThrottle,)
+    throttle_scope = 'residence_verify'
+
+    @transaction.atomic
+    def post(self, request):
+        user = User.objects.select_for_update().get(pk=request.user.pk)
+        serializer = VerifyResidenceSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        complex_id = serializer.validated_data['residential_complex']
+        complex = ResidentialComplex.objects.filter(pk=complex_id, is_active=True).first()
+        if complex is None:
+            raise ValidationError({'residential_complex': 'Choose a listed residential complex.'})
+        if user.is_resident_verified and user.residential_complex_id == complex.pk:
+            raise ValidationError({'residential_complex': 'This residential complex is already confirmed.'})
+        if not complex.check_code(serializer.validated_data['code']):
+            raise ValidationError({'code': 'Incorrect code for the selected residential complex.'})
+        verified_at = timezone.now()
+        if user.is_resident_verified:
+            Listing.objects.filter(owner=user, archived_at__isnull=True).update(archived_at=verified_at)
+        updated = User.objects.filter(pk=user.pk, residential_complex_id=user.residential_complex_id,
+            residential_verified_at=user.residential_verified_at).update(
+            residential_complex=complex, residential_verified_at=verified_at)
+        if not updated:
+            raise ValidationError({'detail': 'Residential complex changed during verification. Try again.'})
+        request.user.refresh_from_db()
+        return Response(UserSerializer(request.user).data)
 
 
 class LogoutView(APIView):

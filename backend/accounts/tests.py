@@ -1,5 +1,8 @@
+import secrets
 from rest_framework.test import APITestCase
-from .models import User
+from django.core.cache import cache
+from django.utils import timezone
+from .models import ResidentialComplex, User
 
 class AuthFlowTests(APITestCase):
     def test_register_login_refresh_me_logout(self):
@@ -138,3 +141,113 @@ class AccountSecurityTests(APITestCase):
         statuses = [self.client.post('/api/v1/auth/login', {'email': 'unknown@example.com', 'password': 'x'}).status_code
                     for _ in range(21)]
         self.assertEqual(statuses[-1], 429)
+
+
+class ResidenceVerificationTests(APITestCase):
+    @classmethod
+    def setUpTestData(cls):
+        cls.code = secrets.token_urlsafe(16)
+        cls.complex = ResidentialComplex(name='Almaly Residence')
+        cls.complex.set_code(cls.code)
+        cls.complex.save()
+        cls.other = ResidentialComplex(name='Central Residence')
+        cls.other_code = secrets.token_urlsafe(16)
+        cls.other.set_code(cls.other_code)
+        cls.other.save()
+        cls.user = User.objects.create_user('resident@example.com', 'Resident-Pass-9712!')
+
+    def setUp(self):
+        cache.clear()
+        self.client.force_authenticate(user=self.user)
+
+    def test_wrong_then_correct_code_updates_profile_without_new_login(self):
+        self.assertFalse(self.user.is_resident_verified)
+        self.assertEqual(self.client.get('/api/v1/auth/me').status_code, 200)
+        complexes = self.client.get('/api/v1/auth/residential-complexes')
+        self.assertEqual(complexes.status_code, 200)
+        self.assertEqual(len(complexes.data), 2)
+        self.assertNotIn('code_hash', complexes.data[0])
+        url = '/api/v1/auth/residential-complex/verify'
+        payload = {'residential_complex': self.complex.pk, 'code': 'wrong-code'}
+        response = self.client.post(url, payload)
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('code', response.data)
+        self.user.refresh_from_db()
+        self.assertFalse(self.user.is_resident_verified)
+        payload['code'] = self.code
+        response = self.client.post(url, payload)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertTrue(response.data['is_resident_verified'])
+        self.assertEqual(response.data['residential_complex']['id'], self.complex.pk)
+        self.assertNotIn('code', response.data)
+        self.assertNotIn('code_hash', response.data)
+        self.assertEqual(self.client.get('/api/v1/listings').status_code, 200)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.is_resident_verified)
+        self.assertNotEqual(self.complex.code_hash, self.code)
+
+    def test_confirmed_user_can_switch_with_new_code_and_old_listings_are_hidden(self):
+        self.client.post('/api/v1/auth/residential-complex/verify',
+                         {'residential_complex': self.complex.pk, 'code': self.code})
+        from listings.models import Category, Listing
+        listing = Listing.objects.create(owner=self.user, category=Category.objects.first(),
+            type='offer', title='Old complex listing', description='Old complex', duration='One day')
+        self.assertEqual(self.client.post('/api/v1/auth/residential-complex/verify',
+                         {'residential_complex': self.other.pk, 'code': 'wrong-code'}).status_code, 400)
+        self.assertEqual(self.client.get(f'/api/v1/listings/{listing.pk}').status_code, 200)
+        response = self.client.patch('/api/v1/auth/me', {'residential_complex': self.other.pk,
+            'is_resident_verified': False, 'residential_verified_at': None}, format='json')
+        self.assertEqual(response.status_code, 200)
+        self.user.refresh_from_db()
+        self.assertEqual(self.user.residential_complex_id, self.complex.pk)
+        self.assertTrue(self.user.is_resident_verified)
+        response = self.client.post('/api/v1/auth/residential-complex/verify',
+            {'residential_complex': self.other.pk, 'code': self.other_code})
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['residential_complex']['id'], self.other.pk)
+        self.assertEqual(self.client.get(f'/api/v1/listings/{listing.pk}').status_code, 404)
+        self.assertEqual(self.client.get(f'/api/v1/listings/{listing.pk}/contacts').status_code, 404)
+        self.assertEqual(self.client.get('/api/v1/listings').data['count'], 0)
+        listing.refresh_from_db()
+        self.assertIsNotNone(listing.archived_at)
+        old_neighbor = User.objects.create_user('old-neighbor@example.com', 'Old-Neigbor-9712!',
+            residential_complex=self.complex, residential_verified_at=timezone.now())
+        self.client.force_authenticate(user=old_neighbor)
+        self.assertEqual(self.client.get(f'/api/v1/listings/{listing.pk}').status_code, 404)
+        self.assertEqual(self.client.get('/api/v1/listings').data['count'], 0)
+        self.client.force_authenticate(user=self.user)
+        new_listing = self.client.post('/api/v1/listings', {'type': 'offer', 'title': 'New complex listing',
+            'description': 'New complex', 'category': listing.category_id, 'duration': 'One day'})
+        self.assertEqual(new_listing.status_code, 201, new_listing.data)
+        self.client.force_authenticate(user=old_neighbor)
+        self.assertEqual(self.client.get(f"/api/v1/listings/{new_listing.data['id']}").status_code, 404)
+        self.client.force_authenticate(user=self.user)
+        self.assertEqual(self.client.post('/api/v1/auth/residential-complex/verify',
+            {'residential_complex': self.other.pk, 'code': self.other_code}).status_code, 400)
+
+    def test_verification_attempts_are_throttled(self):
+        url = '/api/v1/auth/residential-complex/verify'
+        payload = {'residential_complex': self.complex.pk, 'code': 'wrong-code'}
+        statuses = [self.client.post(url, payload).status_code for _ in range(6)]
+        self.assertEqual(statuses[:5], [400] * 5)
+        self.assertEqual(statuses[-1], 429)
+
+    def test_admin_can_create_and_rotate_code_without_exposing_hash(self):
+        admin = User.objects.create_superuser('admin@example.com', 'Admin-Pass-7241!')
+        first_code, second_code = secrets.token_urlsafe(16), secrets.token_urlsafe(16)
+        self.client.force_authenticate(user=None)
+        self.client.force_login(admin)
+        response = self.client.post('/admin/accounts/residentialcomplex/add/',
+            {'name': 'Demo Court', 'is_active': 'on', 'code': first_code, '_save': 'Save'})
+        self.assertEqual(response.status_code, 302)
+        complex = ResidentialComplex.objects.get(name='Demo Court')
+        self.assertTrue(complex.check_code(first_code))
+        self.assertNotEqual(complex.code_hash, first_code)
+        response = self.client.get(f'/admin/accounts/residentialcomplex/{complex.pk}/change/')
+        self.assertNotContains(response, complex.code_hash)
+        response = self.client.post(f'/admin/accounts/residentialcomplex/{complex.pk}/change/',
+            {'name': 'Demo Court', 'is_active': 'on', 'code': second_code, '_save': 'Save'})
+        self.assertEqual(response.status_code, 302)
+        complex.refresh_from_db()
+        self.assertFalse(complex.check_code(first_code))
+        self.assertTrue(complex.check_code(second_code))

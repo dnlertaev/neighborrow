@@ -35,6 +35,7 @@ class Listing(models.Model):
     duration = models.CharField(max_length=100)
     needed_until = models.DateField(null=True, blank=True)
     available = models.BooleanField(default=True)
+    archived_at = models.DateTimeField(null=True, blank=True)
     neighborhood = models.CharField(max_length=150, blank=True)
     latitude = models.FloatField(null=True, blank=True, validators=[MinValueValidator(-90), MaxValueValidator(90)])
     longitude = models.FloatField(null=True, blank=True, validators=[MinValueValidator(-180), MaxValueValidator(180)])
@@ -71,6 +72,8 @@ class Activity(models.Model):
     recipient = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='activities')
     actor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.SET_NULL, null=True, related_name='+')
     listing = models.ForeignKey(Listing, on_delete=models.SET_NULL, null=True, related_name='+')
+    residential_complex = models.ForeignKey('accounts.ResidentialComplex', on_delete=models.PROTECT,
+                                            null=True, blank=True, related_name='+')
     type = models.CharField(max_length=32)
     item_title = models.CharField(max_length=100)
     description = models.CharField(max_length=255)
