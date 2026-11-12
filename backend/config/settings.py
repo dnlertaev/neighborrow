@@ -29,6 +29,7 @@ INSTALLED_APPS = [
 ]
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware', 'django.middleware.csrf.CsrfViewMiddleware',
@@ -94,6 +95,6 @@ if os.environ.get('DJANGO_TRUST_PROXY', '0') == '1':
 LANGUAGE_CODE = 'en-us'
 TIME_ZONE = 'UTC'
 USE_TZ = True
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
