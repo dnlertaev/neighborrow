@@ -1,17 +1,22 @@
 # Python
 __pycache__/
 *.py[cod]
-.venv/
+.venv*/
 venv/
 *.sqlite3
+.npm-test-cache/
 .env
 .env.*
 !.env.example
 
 # Frontend
 node_modules/
+.next/
+.vinext/
 dist/
-.angular/
+*.tsbuildinfo
+next-env.d.ts
+coverage/
 
 # Editor
 .vscode/
