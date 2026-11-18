@@ -4,7 +4,8 @@ export type Category = { id: number; name: string; slug: string };
 export type Listing = {
   id: number; type: "offer" | "request"; title: string; description: string;
   category: number; category_name: string; owner: { id: number; display_name: string };
-  condition: "good" | "like_new" | "any_working"; duration: string; needed_until: string | null;
+  // Blank for requests: only offers describe the state of an item.
+  condition: "good" | "like_new" | "any_working" | ""; duration: string; needed_until: string | null;
   available: boolean; neighborhood: string; image_url: string; distance_km: number | null;
   created_at: string; updated_at: string; mine: boolean; has_responded: boolean;
 };

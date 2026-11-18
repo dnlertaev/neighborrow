@@ -65,7 +65,20 @@ class ListingSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError({'needed_until': 'Choose today or a later date.'})
         if self.instance and 'type' in attrs and attrs['type'] != self.instance.type:
             raise serializers.ValidationError({'type': 'Create a new listing to change its type.'})
+        kind = attrs.get('type', getattr(self.instance, 'type', None))
+        if kind == Listing.Kind.REQUEST:
+            # A request has no item yet, so it never stores a condition.
+            attrs['condition'] = ''
+        elif kind == Listing.Kind.OFFER and (self.instance is None or 'condition' in attrs) \
+                and not attrs.get('condition'):
+            raise serializers.ValidationError({'condition': "Choose the item's condition."})
         return attrs
+
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        if instance.type == Listing.Kind.REQUEST:
+            data['condition'] = ''
+        return data
 
 
 class FeedQuerySerializer(serializers.Serializer):

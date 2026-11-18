@@ -121,6 +121,42 @@ class ListingAPITests(APITestCase):
                 self.assertEqual(self.client.post('/api/v1/listings', self.payload(**fields), format='json').status_code, 400)
         self.assertEqual(self.client.patch(f'/api/v1/listings/{self.offer.pk}', {'type': 'request'}).status_code, 400)
 
+    def test_request_has_no_condition(self):
+        response = self.client.post('/api/v1/listings', self.payload(), format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['condition'], '')
+        self.assertEqual(Listing.objects.get(pk=response.data['id']).condition, '')
+        # Older clients may still send a condition; it is not stored for a request.
+        response = self.client.post('/api/v1/listings', self.payload(condition='like_new'), format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        listing = Listing.objects.get(pk=response.data['id'])
+        self.assertEqual(listing.condition, '')
+        response = self.client.patch(f'/api/v1/listings/{listing.pk}', {'title': 'Long garden hose'}, format='json')
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual(response.data['condition'], '')
+
+    def test_legacy_request_condition_is_kept_but_not_exposed(self):
+        legacy = Listing.objects.create(owner=self.owner, type='request', title='Old request', description='Legacy',
+                                        category=self.tools, duration='1 day', condition='good')
+        self.assertEqual(self.client.get(f'/api/v1/listings/{legacy.pk}').data['condition'], '')
+        legacy.refresh_from_db()
+        self.assertEqual((legacy.type, legacy.condition), ('request', 'good'))
+
+    def test_offer_requires_condition(self):
+        offer = self.payload(type='offer', title='Ladder', category=self.tools.pk)
+        for fields in ({}, {'condition': ''}, {'condition': 'broken'}):
+            with self.subTest(fields=fields):
+                response = self.client.post('/api/v1/listings', offer | fields, format='json')
+                self.assertEqual(response.status_code, 400)
+                self.assertIn('condition', response.data)
+        response = self.client.post('/api/v1/listings', offer | {'condition': 'like_new'}, format='json')
+        self.assertEqual(response.status_code, 201, response.data)
+        self.assertEqual(response.data['condition'], 'like_new')
+        url = f"/api/v1/listings/{response.data['id']}"
+        self.assertEqual(self.client.patch(url, {'condition': ''}, format='json').status_code, 400)
+        self.assertEqual(self.client.patch(url, {'available': False}, format='json').status_code, 200)
+        self.assertEqual(Listing.objects.get(pk=response.data['id']).condition, 'like_new')
+
     def test_contacts_require_login_and_no_private_profile_fallback(self):
         url = f'/api/v1/listings/{self.offer.pk}/contacts'
         self.client.force_authenticate(user=None)

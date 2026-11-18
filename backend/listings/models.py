@@ -31,7 +31,8 @@ class Listing(models.Model):
     type = models.CharField(max_length=7, choices=Kind.choices)
     title = models.CharField(max_length=100)
     description = models.TextField(max_length=2000)
-    condition = models.CharField(max_length=16, choices=Condition.choices, default=Condition.GOOD)
+    # Only offers describe the state of an item; requests keep this blank.
+    condition = models.CharField(max_length=16, choices=Condition.choices, blank=True, default='')
     duration = models.CharField(max_length=100)
     needed_until = models.DateField(null=True, blank=True)
     available = models.BooleanField(default=True)

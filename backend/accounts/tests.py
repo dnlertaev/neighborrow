@@ -217,7 +217,8 @@ class ResidenceVerificationTests(APITestCase):
         self.assertEqual(self.client.get('/api/v1/listings').data['count'], 0)
         self.client.force_authenticate(user=self.user)
         new_listing = self.client.post('/api/v1/listings', {'type': 'offer', 'title': 'New complex listing',
-            'description': 'New complex', 'category': listing.category_id, 'duration': 'One day'})
+            'description': 'New complex', 'category': listing.category_id, 'duration': 'One day',
+            'condition': 'good'})
         self.assertEqual(new_listing.status_code, 201, new_listing.data)
         self.client.force_authenticate(user=old_neighbor)
         self.assertEqual(self.client.get(f"/api/v1/listings/{new_listing.data['id']}").status_code, 404)
